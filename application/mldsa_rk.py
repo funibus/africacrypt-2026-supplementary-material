@@ -2,6 +2,19 @@ from dilithium_py.ml_dsa.ml_dsa import ML_DSA
 import random as rd
 
 
+"""
+Implementation of MLDSA-RK: MLDSA with key randomization.
+
+To check the correctness of MLDSA-RK, simply run this file:
+
+python mldsa_rk.py or sage mldsa_rk.py
+
+It will generate random key pairs, sign messages, verify signatures, 
+and also test the key randomization functionality. 
+You should see that all signatures verify correctly, including after key randomization.
+
+"""
+
 class MLDSARK(ML_DSA):
 
     def __init__(self, parameter_set):
@@ -293,7 +306,7 @@ class MLDSARK(ML_DSA):
         self, sk: bytes, m: bytes, rnd: bytes, external_mu: bool = False
     ) -> bytes:
         """
-        Deterministic algorithm to generate a signature for a formatted message
+        Probabilistic algorithm to generate a signature for a formatted message
         M' following Algorithm 7 (FIPS 204)
 
         When `external_mu` is `True`, the message `m` is interpreted instead as
@@ -317,7 +330,7 @@ class MLDSARK(ML_DSA):
             mu = self._h(tr + m, 64)
         rho_prime = self._h(k + rnd + mu, 64)
 
-        kappa = 0
+        kappa = rd.randint(0, 255)  # Start with a random nonce
         alpha = self.gamma_2 << 1
         while True:
             y = self._expand_mask_vector(rho_prime, kappa)
@@ -327,12 +340,6 @@ class MLDSARK(ML_DSA):
             # increment the nonce
             kappa += self.l
 
-            # NOTE: there is an optimisation possible where both the high and
-            # low bits of w are extracted here, which speeds up some checks
-            # below and requires the use of make_hint_optimised() -- to see the
-            # implementation of this, look at the signing algorithm for
-            # dilithium. We include this slower version to mirror the FIPS 204
-            # document precisely.
             # Extract out only the high bits
             w1 = w.high_bits(alpha)
 
@@ -361,7 +368,7 @@ class MLDSARK(ML_DSA):
             h = (-c_t0).make_hint(w - c_s2 + c_t0, alpha)
             if h.sum_hint() > self.omega:
                 continue
-
+            
             h = (h, th)
             return self._pack_sig(c_tilde, z, h)
         
@@ -387,7 +394,7 @@ class MLDSARK(ML_DSA):
 
         A_hat = self._expand_matrix_from_seed(rho)
 
-        tr = self._h(pk, 64)
+        tr = self._h(self._pack_pk(rho, t1), 64)
         mu = self._h(tr + m, 64)
         c = self.R.sample_in_ball(c_tilde, self.tau)
 
@@ -420,5 +427,41 @@ MLDSARK_PARAMS44     =  {
         "oid": (2, 16, 840, 1, 101, 3, 4, 3, 17),
     }
 
-MLDSARK44 = MLDSARK(MLDSARK_PARAMS44)
+mldsa44 = MLDSARK(MLDSARK_PARAMS44)
+
+
+if __name__ == "__main__":
+    print("-" * 50)
+    print("Testing MLDSA-RK with MLDSA44 parameters")
+    print("Generating key pair...")
+    pk, sk = mldsa44.keygen()
+    print("Key pair generated.")
+    print("Public key and secret key (hex):")
+    print(f"pk: ...{pk.hex()[-64:]}")  # Print only the last 32 bytes of pk for brevity
+    print(f"sk: ...{sk.hex()[-64:]}")  # Print only the last 32 bytes of sk for brevity
+
+    m = b"Hello, world!"
+    print(f"Signing message: {m}")
+    sig = mldsa44.sign(sk, m)
+
+    valid = mldsa44.verify(pk, m, sig)
+    print(f"Verification result: {valid}")
+
+    print("-" * 50)
+    print("Testing correctness after key randomization:")
+
+    rho = rd.randbytes(32)
+    pkp = mldsa44.rand_pk(pk, rho)
+    skp = mldsa44.rand_sk(sk, rho)
+    print("Public key and secret key r(hex):")
+    print(f"pk': ...{pkp.hex()[-64:]}")  # Print only the last 32 bytes of pk' for brevity
+    print(f"sk': ...{skp.hex()[-64:]}")  # Print only the last 32 bytes of sk' for brevity
+
+    m = b"Hello, world!"
+    print(f"Signing message: {m} with randomized secret key")
+    sig = mldsa44.sign(skp, m)
+
+    valid = mldsa44.verify(pkp, m, sig)
+    print(f"Verification result with randomized public key: {valid}")
+
 
